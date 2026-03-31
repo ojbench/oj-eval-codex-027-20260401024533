@@ -18,7 +18,7 @@ using namespace std;
 */
 
 struct Token {
-    enum Type { NUM, ID, OP, LP, RP, END } type;
+    enum Type { NUM, ID, OP, LP, RP, STR, END } type;
     long long val{};
     string text;
 };
@@ -31,6 +31,10 @@ struct Lexer {
         while(i<n && isspace((unsigned char)s[i])) ++i;
         if(i>=n) return {Token::END,0,""};
         char c=s[i];
+        if(c=='"'){
+            ++i; string t; while(i<n && s[i]!='"'){ t.push_back(s[i++]); }
+            if(i<n && s[i]=='"') ++i; return {Token::STR,0,t};
+        }
         if(isdigit((unsigned char)c)){
             long long v=0; while(i<n && isdigit((unsigned char)s[i])){ v=v*10+(s[i]-'0'); ++i; }
             return {Token::NUM,v,""};
@@ -41,7 +45,17 @@ struct Lexer {
         }
         if(c=='('){ ++i; return {Token::LP,0,"("}; }
         if(c==')'){ ++i; return {Token::RP,0,")"}; }
-        // operators and others
+        // operators and others (support <=, >=, <>)
+        if(c=='<' || c=='>' || c=='='){
+            ++i;
+            if(i<n){
+                char d = s[i];
+                if((c=='<' && d=='=') || (c=='>' && d=='=') || (c=='<' && d=='>')){
+                    ++i; return {Token::OP,0,string()+c+d};
+                }
+            }
+            return {Token::OP,0,string(1,c)};
+        }
         ++i; return {Token::OP,0,string(1,c)};
     }
 };
@@ -55,6 +69,20 @@ struct Parser {
 
 struct Interpreter {
     unordered_map<string,long long> vars;
+    
+    long long parseRel(Parser &ps){
+        long long lhs = parseAdd(ps);
+        Token t = ps.peek();
+        if(t.type==Token::OP){
+            string op=t.text;
+            if(op=="<"||op==">"||op=="="||op=="<="||op==">="||op=="<>"){
+                ps.get(); long long rhs=parseAdd(ps);
+                if(op=="<") return lhs<rhs; if(op==">") return lhs>rhs; if(op=="=") return lhs==rhs;
+                if(op=="<=") return lhs<=rhs; if(op==">=") return lhs>=rhs; if(op=="<>") return lhs!=rhs;
+            }
+        }
+        return lhs;
+    }
 
     long long parseExpr(Parser &ps){ return parseAdd(ps); }
     long long parseAdd(Parser &ps){
@@ -88,6 +116,7 @@ struct Interpreter {
         if(t.type==Token::LP){
             long long v=parseExpr(ps); (void)ps.get(); return v;
         }
+        if(t.type==Token::STR){ return 0; }
         if(t.type==Token::ID){
             auto it=vars.find(t.text); return it==vars.end()?0:it->second;
         }
@@ -105,8 +134,16 @@ struct Interpreter {
         Parser ps(toks);
         Token t = ps.get();
         if(t.type==Token::ID){
+            if(t.text=="rem") return false;
             if(t.text=="print"){
-                long long v = parseExpr(ps); cout<<v<<"\n"; return false;
+                bool first=true; while(true){
+                    Token pk=ps.peek(); if(pk.type==Token::END) break;
+                    if(!first) cout<<" ";
+                    if(pk.type==Token::STR){ ps.get(); cout<<pk.text; }
+                    else { long long v=parseExpr(ps); cout<<v; }
+                    first=false; Token sep=ps.peek(); if(sep.type==Token::OP && (sep.text==","||sep.text==";")){ ps.get(); continue; }
+                }
+                cout<<"\n"; return false;
             } else if(t.text=="let"){
                 Token id=ps.get(); if(id.type!=Token::ID) return false;
                 string name=id.text;
@@ -119,6 +156,11 @@ struct Interpreter {
             } else if(isdigits(t.text)){
                 // shouldn't happen; handled later
                 return false;
+            } else {
+                // assignment without LET
+                Token pk=ps.peek(); if(pk.type==Token::OP && pk.text=="="){
+                    ps.get(); long long v=parseExpr(ps); vars[t.text]=v; return false;
+                }
             }
         }
         return false;
@@ -127,9 +169,18 @@ struct Interpreter {
     static bool isdigits(const string &s){ if(s.empty()) return false; for(char c:s) if(!isdigit((unsigned char)c)) return false; return true; }
 
     void runProgram(map<int,string> &prog){
-        for(auto &kv: prog){
-            if(execImmediate(kv.second)) break;
-        }
+        if(prog.empty()) return; vector<int> lines; lines.reserve(prog.size()); for(auto &kv:prog) lines.push_back(kv.first);
+        unordered_map<int,int> idx; for(size_t i=0;i<lines.size();++i) idx[lines[i]]=(int)i;
+        int pc=0; while(pc>=0 && pc<(int)lines.size()){
+            string s=prog[lines[pc]]; auto toks=lexLine(s); Parser ps(toks); Token t=ps.get(); bool advanced=true;
+            if(t.type==Token::ID){ string kw=t.text;
+                if(kw=="rem"){ }
+                else if(kw=="end"){ break; }
+                else if(kw=="goto"){ Token num=ps.get(); if(num.type==Token::NUM){ auto it=idx.find((int)num.val); if(it!=idx.end()){ pc=it->second; advanced=false; } } }
+                else if(kw=="if"){ long long cond=parseRel(ps); Token th=ps.get(); if(th.type==Token::ID && th.text=="then"){ Token num=ps.get(); if(cond && num.type==Token::NUM){ auto it=idx.find((int)num.val); if(it!=idx.end()){ pc=it->second; advanced=false; } } } }
+                else { (void)execImmediate(s); }
+            } else { (void)execImmediate(s); }
+            if(advanced) ++pc; }
     }
 };
 
@@ -164,4 +215,3 @@ int main(){
     }
     return 0;
 }
-
