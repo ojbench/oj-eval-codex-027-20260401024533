@@ -138,10 +138,10 @@ struct Interpreter {
             if(t.text=="print"){
                 bool first=true; while(true){
                     Token pk=ps.peek(); if(pk.type==Token::END) break;
-                    if(!first) cout<<" ";
+                    if(!first) {/* space controlled by separators */}
                     if(pk.type==Token::STR){ ps.get(); cout<<pk.text; }
                     else { long long v=parseExpr(ps); cout<<v; }
-                    first=false; Token sep=ps.peek(); if(sep.type==Token::OP && (sep.text==","||sep.text==";")){ ps.get(); continue; }
+                    first=false; Token sep=ps.peek(); if(sep.type==Token::OP && (sep.text==","||sep.text==";")){ ps.get(); if(sep.text==",") cout<<" "; continue; }
                 }
                 cout<<"\n"; return false;
             } else if(t.text=="let"){
